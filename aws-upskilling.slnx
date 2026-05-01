@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="CI-CD\Pipeline\Pipeline.csproj" Type="Classic C#" />
+  <Project Path="Infrastructure/Infrastructure.csproj" />
+  <Project Path="LambdaHandlers.Tests/LambdaHandlers.Tests.csproj" />
+  <Project Path="LambdaHandlers/LambdaHandlers.csproj" />
+</Solution>

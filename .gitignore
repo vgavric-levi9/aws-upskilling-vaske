@@ -248,3 +248,8 @@ src/.idea/
 
 # Docker environment files (may contain tokens)
 .env
+
+# AWS CDK
+cdk.out/
+.cdk.staging/
+cdk.context.json

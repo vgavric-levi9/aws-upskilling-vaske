@@ -1,0 +1,44 @@
+# CodeBuild for Vaske Media Processor - CDK Deployment phase
+# Focus on Infrastructure as Code deployment
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      dotnet: 8.0
+      nodejs: 20
+    commands:
+      - echo "📦 Preparing Vaske CDK Deployment Environment..."
+      - echo "✅ .NET version: $(dotnet --version)"
+      - echo "✅ Node.js version: $(node --version)"
+      - npm install -g aws-cdk
+      - echo "✅ CDK version: $(cdk --version)"
+
+  pre_build:
+    commands:
+      - echo "🔧 Preparing CDK deployment for Vaske Media Processor..."
+      - dotnet restore Infrastructure/Infrastructure.csproj
+      - dotnet build Infrastructure/Infrastructure.csproj -c Release
+      - echo "✅ Infrastructure build completed"
+
+  build:
+    on-failure: ABORT
+    commands:
+      - echo "🚀 Deploying Vaske Media Processor to AWS..."
+      - cd Infrastructure
+      - echo "📋 CDK diff preview:"
+      - cdk diff VaskeMediaProcessor-App || true
+      - echo "🌟 Starting deployment..."
+      - cdk deploy VaskeMediaProcessor-App --require-approval never
+      - echo "✅ Deployment successful!"
+
+  post_build:
+    commands:
+      - echo "📊 Deployment Summary:"
+      - echo "- Lambda functions deployed ✅"
+      - echo "- S3 buckets configured ✅"
+      - echo "- DynamoDB table ready ✅"
+      - echo "- API Gateway active ✅"
+      - echo "🎉 Vaske Media Processor is LIVE!"
+      - echo ""
+      - echo "🔗 Check outputs for API endpoints"

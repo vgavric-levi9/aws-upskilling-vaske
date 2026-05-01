@@ -1,3 +1,5 @@
+# CodeBuild for Vaske Media Processor - Test and Build phase
+# Focus on quality assurance with mandatory testing
 version: 0.2
 
 phases:
@@ -6,29 +8,54 @@ phases:
       dotnet: 8.0
       nodejs: 20
     commands:
-      - echo Installing dependencies...
-      - dotnet --version
-      - node --version
+      - echo "📦 Installing Vaske Media Processor dependencies..."
+      - echo "✅ .NET version: $(dotnet --version)"
+      - echo "✅ Node.js version: $(node --version)"
+      - npm install -g aws-cdk
+      - echo "✅ CDK version: $(cdk --version)"
+
+  pre_build:
+    on-failure: ABORT
+    commands:
+      - echo "🧪 Running Vaske Media Processor Tests (MUST PASS)..."
       - dotnet restore LambdaHandlers/LambdaHandlers.csproj
       - dotnet restore LambdaHandlers.Tests/LambdaHandlers.Tests.csproj
       - dotnet restore Infrastructure/Infrastructure.csproj
+      - dotnet build LambdaHandlers/LambdaHandlers.csproj -c Release --no-restore
+      - dotnet build LambdaHandlers.Tests/LambdaHandlers.Tests.csproj -c Release --no-restore
+      - echo "⚠️ Running unit tests - Pipeline FAILS if tests fail"
+      - dotnet test LambdaHandlers.Tests/LambdaHandlers.Tests.csproj -c Release --no-build --verbosity normal --logger trx --results-directory TestResults
 
   build:
+    on-failure: ABORT
     commands:
-      - echo Building LambdaHandlers...
-      - dotnet build LambdaHandlers/LambdaHandlers.csproj -c Release
-      - echo Building Infrastructure...
-      - dotnet build Infrastructure/Infrastructure.csproj -c Release
-      - echo Running tests...
-      - dotnet test LambdaHandlers.Tests/LambdaHandlers.Tests.csproj -c Release --no-build --verbosity normal
+      - echo "🏗️ Building Vaske Infrastructure..."
+      - dotnet build Infrastructure/Infrastructure.csproj -c Release --no-restore
+      - echo "📦 Publishing Lambda handlers for deployment..."
+      - dotnet publish LambdaHandlers/LambdaHandlers.csproj -c Release -o LambdaHandlers/bin/Release/net8.0/publish --no-restore
+      - echo "✅ Build completed successfully - ready for deployment"
 
   post_build:
     commands:
-      - echo Publishing LambdaHandlers...
-      - dotnet publish LambdaHandlers/LambdaHandlers.csproj -c Release -o LambdaHandlers/bin/Release/net8.0/publish
-      - echo Build completed successfully
+      - echo "📊 Build Summary:"
+      - echo "- Lambda handlers published ✅"
+      - echo "- Infrastructure ready ✅"  
+      - echo "- Tests passed ✅"
+      - echo "🚀 Ready for CDK deployment!"
 
 artifacts:
   files:
     - '**/*'
+  name: VaskeMediaProcessorArtifacts
   base-directory: .
+
+reports:
+  VaskeTestResults:
+    files:
+      - '**/*'
+    base-directory: 'TestResults'
+    file-format: 'VISUALSTUDIOTRX'
+
+cache:
+  paths:
+    - '/root/.nuget/**/*'

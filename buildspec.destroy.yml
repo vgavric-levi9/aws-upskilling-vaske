@@ -1,0 +1,49 @@
+# CodeBuild for Vaske Media Processor - Infrastructure Destruction
+# ⚠️ WARNING: This buildspec deletes ALL AWS resources!
+# Used only for demo/cleanup purposes
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      dotnet: 8.0
+      nodejs: 20
+    commands:
+      - echo "🧹 Preparing Vaske Media Processor Cleanup..."
+      - echo "⚠️ This will DESTROY all AWS resources!"
+      - echo "✅ .NET version: $(dotnet --version)"
+      - echo "✅ Node.js version: $(node --version)"
+      - npm install -g aws-cdk
+      - echo "✅ CDK version: $(cdk --version)"
+
+  pre_build:
+    commands:
+      - echo "🔧 Preparing CDK destruction for Vaske Media Processor..."
+      - dotnet restore Infrastructure/Infrastructure.csproj
+      - dotnet build Infrastructure/Infrastructure.csproj -c Release
+      - echo "✅ Infrastructure build completed"
+
+  build:
+    commands:
+      - echo "🗑️ Starting Vaske Media Processor destruction..."
+      - cd Infrastructure
+      - echo "📋 Resources to be destroyed:"
+      - cdk ls
+      - echo ""
+      - echo "⚠️ Destroying infrastructure in 10 seconds..."
+      - sleep 10
+      - echo "💥 Starting destruction..."
+      - cdk destroy VaskeMediaProcessor-App --force
+      - echo "🧹 Cleanup completed!"
+
+  post_build:
+    commands:
+      - echo "📊 Destruction Summary:"
+      - echo "- All Lambda functions removed 🗑️"
+      - echo "- S3 buckets deleted 🗑️"
+      - echo "- DynamoDB table removed 🗑️"
+      - echo "- API Gateway deleted 🗑️"
+      - echo "- CloudWatch logs cleaned 🗑️"
+      - echo "✅ All Vaske Media Processor resources destroyed!"
+      - echo ""
+      - echo "💰 No ongoing AWS charges from this stack"

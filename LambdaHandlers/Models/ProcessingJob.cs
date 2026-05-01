@@ -2,7 +2,7 @@ using Amazon.DynamoDBv2.DataModel;
 
 namespace LambdaHandlers.Models;
 
-[DynamoDBTable("MediaProcessingJobs")]
+[DynamoDBTable("VaskeMediaProcessingJobs")]
 public class ProcessingJob
 {
     [DynamoDBHashKey]

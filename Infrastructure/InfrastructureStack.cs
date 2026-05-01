@@ -10,6 +10,7 @@ using Amazon.CDK.AWS.Logs;
 using Amazon.CDK.AWS.S3;
 using Amazon.CDK.AWS.S3.Notifications;
 using Constructs;
+using Infrastructure.Permissions;
 
 namespace Infrastructure;
 
@@ -18,10 +19,10 @@ public class InfrastructureStack : Stack
     public InfrastructureStack(Construct scope, string id, IStackProps? props = null)
         : base(scope, id, props)
     {
-        // Create S3 buckets
-        var inputBucket = new Bucket(this, "MediaProcessorInputBucket", new BucketProps
+        // Create S3 buckets with "vaske" naming
+        var inputBucket = new Bucket(this, "VaskeMediaProcessorInputBucket", new BucketProps
         {
-            BucketName = $"media-processor-input-{Account}",
+            BucketName = $"vaske-media-processor-input-{Account}",
             RemovalPolicy = RemovalPolicy.DESTROY,
             AutoDeleteObjects = true,
             Versioned = false,
@@ -36,9 +37,9 @@ public class InfrastructureStack : Stack
             }
         });
 
-        var outputBucket = new Bucket(this, "MediaProcessorOutputBucket", new BucketProps
+        var outputBucket = new Bucket(this, "VaskeMediaProcessorOutputBucket", new BucketProps
         {
-            BucketName = $"media-processor-output-{Account}",
+            BucketName = $"vaske-media-processor-output-{Account}",
             RemovalPolicy = RemovalPolicy.DESTROY,
             AutoDeleteObjects = true,
             Versioned = false,
@@ -53,10 +54,10 @@ public class InfrastructureStack : Stack
             }
         });
 
-        // Create DynamoDB table
-        var processingTable = new Table(this, "MediaProcessingJobs", new TableProps
+        // Create DynamoDB table with "vaske" naming
+        var processingTable = new Table(this, "VaskeMediaProcessingJobs", new TableProps
         {
-            TableName = "MediaProcessingJobs",
+            TableName = "VaskeMediaProcessingJobs",
             PartitionKey = new Amazon.CDK.AWS.DynamoDB.Attribute
             {
                 Name = "JobId",
@@ -67,63 +68,19 @@ public class InfrastructureStack : Stack
             PointInTimeRecovery = false
         });
 
-        // Create Lambda execution role with necessary permissions
-        var lambdaRole = new Role(this, "MediaProcessorLambdaRole", new RoleProps
-        {
-            AssumedBy = new ServicePrincipal("lambda.amazonaws.com"),
-            ManagedPolicies = new[]
-            {
-                ManagedPolicy.FromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole")
-            },
-            InlinePolicies = new Dictionary<string, PolicyDocument>
-            {
-                ["MediaProcessorPolicy"] = new PolicyDocument(new PolicyDocumentProps
-                {
-                    Statements = new[]
-                    {
-                        new PolicyStatement(new PolicyStatementProps
-                        {
-                            Effect = Effect.ALLOW,
-                            Actions = new[]
-                            {
-                                "s3:GetObject",
-                                "s3:PutObject",
-                                "s3:DeleteObject",
-                                "s3:GetObjectVersion"
-                            },
-                            Resources = new[]
-                            {
-                                $"{inputBucket.BucketArn}/*",
-                                $"{outputBucket.BucketArn}/*"
-                            }
-                        }),
-                        new PolicyStatement(new PolicyStatementProps
-                        {
-                            Effect = Effect.ALLOW,
-                            Actions = new[]
-                            {
-                                "dynamodb:GetItem",
-                                "dynamodb:PutItem",
-                                "dynamodb:UpdateItem",
-                                "dynamodb:Query",
-                                "dynamodb:Scan",
-                                "dynamodb:DescribeTable"
-                            },
-                            Resources = new[] { processingTable.TableArn }
-                        })
-                    }
-                })
-            }
-        });
+        // Create specialized IAM roles with minimal permissions
+        var imageUploadRole = LambdaRoles.CreateImageUploadRole(this, inputBucket.BucketArn, processingTable.TableArn);
+        var mediaProcessorRole = LambdaRoles.CreateMediaProcessorRole(this, inputBucket.BucketArn, outputBucket.BucketArn, processingTable.TableArn);
+        var statusQueryRole = LambdaRoles.CreateStatusQueryRole(this, outputBucket.BucketArn, processingTable.TableArn);
 
-        // Create Lambda functions
-        var uploadHandler = new Function(this, "ImageUploadHandler", new FunctionProps
+        // Create Lambda functions with "vaske" naming and specialized roles
+        var uploadHandler = new Function(this, "VaskeImageUploadHandler", new FunctionProps
         {
             Runtime = Runtime.DOTNET_8,
             Handler = "LambdaHandlers::LambdaHandlers.Handlers.ImageUpload::FunctionHandler",
             Code = Code.FromAsset("../LambdaHandlers/bin/Release/net8.0/publish"),
-            FunctionName = "ImageUploadHandler",
-            Role = lambdaRole,
+            FunctionName = "VaskeImageUploadHandler",
+            Role = imageUploadRole,
             Timeout = Duration.Minutes(1),
             MemorySize = 512,
             Environment = new Dictionary<string, string>
@@ -134,13 +91,13 @@ public class InfrastructureStack : Stack
             LogRetention = RetentionDays.ONE_WEEK
         });
 
-        var processorHandler = new Function(this, "MediaProcessorHandler", new FunctionProps
+        var processorHandler = new Function(this, "VaskeMediaProcessorHandler", new FunctionProps
         {
             Runtime = Runtime.DOTNET_8,
             Handler = "LambdaHandlers::LambdaHandlers.Handlers.MediaProcessor::FunctionHandler",
             Code = Code.FromAsset("../LambdaHandlers/bin/Release/net8.0/publish"),
-            FunctionName = "MediaProcessorHandler",
-            Role = lambdaRole,
+            FunctionName = "VaskeMediaProcessorHandler",
+            Role = mediaProcessorRole,
             Timeout = Duration.Minutes(5),
             MemorySize = 1024,
             Environment = new Dictionary<string, string>
@@ -151,13 +108,13 @@ public class InfrastructureStack : Stack
             LogRetention = RetentionDays.ONE_WEEK
         });
 
-        var statusHandler = new Function(this, "StatusQueryHandler", new FunctionProps
+        var statusHandler = new Function(this, "VaskeStatusQueryHandler", new FunctionProps
         {
             Runtime = Runtime.DOTNET_8,
             Handler = "LambdaHandlers::LambdaHandlers.Handlers.StatusQuery::FunctionHandler",
             Code = Code.FromAsset("../LambdaHandlers/bin/Release/net8.0/publish"),
-            FunctionName = "StatusQueryHandler",
-            Role = lambdaRole,
+            FunctionName = "VaskeStatusQueryHandler",
+            Role = statusQueryRole,
             Timeout = Duration.Seconds(30),
             MemorySize = 256,
             Environment = new Dictionary<string, string>
@@ -173,11 +130,11 @@ public class InfrastructureStack : Stack
             new LambdaDestination(processorHandler)
         );
 
-        // Create REST API Gateway
-        var api = new RestApi(this, "MediaProcessorApi", new RestApiProps
+        // Create REST API Gateway with "vaske" naming
+        var api = new RestApi(this, "VaskeMediaProcessorApi", new RestApiProps
         {
-            RestApiName = "Media Processor API",
-            Description = "API Gateway for Serverless Media Processor",
+            RestApiName = "Vaske Media Processor API",
+            Description = "API Gateway for Vaske Serverless Media Processor",
             DefaultCorsPreflightOptions = new CorsOptions
             {
                 AllowOrigins = Cors.ALL_ORIGINS,
@@ -247,10 +204,10 @@ public class InfrastructureStack : Stack
         docVersion.Node.AddDependency(uploadDoc);
         docVersion.Node.AddDependency(statusDoc);
 
-        // CloudWatch Dashboard
-        var dashboard = new Amazon.CDK.AWS.CloudWatch.Dashboard(this, "MediaProcessorDashboard", new Amazon.CDK.AWS.CloudWatch.DashboardProps
+        // CloudWatch Dashboard with "vaske" naming
+        var dashboard = new Amazon.CDK.AWS.CloudWatch.Dashboard(this, "VaskeMediaProcessorDashboard", new Amazon.CDK.AWS.CloudWatch.DashboardProps
         {
-            DashboardName = "MediaProcessor-Monitoring"
+            DashboardName = "VaskeMediaProcessor-Monitoring"
         });
 
         // Output important information

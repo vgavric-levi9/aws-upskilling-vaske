@@ -19,8 +19,12 @@ phases:
   pre_build:
     commands:
       - echo "🔧 Preparing CDK destruction for Vaske Media Processor..."
+      - dotnet restore LambdaHandlers/LambdaHandlers.csproj
       - dotnet restore Infrastructure/Infrastructure.csproj
-      - dotnet build Infrastructure/Infrastructure.csproj -c Release
+      - dotnet build Infrastructure/Infrastructure.csproj -c Release --no-restore
+      # CDK synth (run by `cdk ls` / `cdk destroy`) requires the Lambda asset
+      # directory to exist, even when we're only tearing the stack down.
+      - dotnet publish LambdaHandlers/LambdaHandlers.csproj -c Release -o LambdaHandlers/bin/Release/net8.0/publish --no-restore
       - echo "✅ Infrastructure build completed"
 
   build:

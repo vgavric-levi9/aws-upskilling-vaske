@@ -14,16 +14,17 @@ namespace LambdaHandlers.Tests.Handlers;
 public class MediaProcessorTests
 {
     private readonly Mock<IAmazonS3> _mockS3;
-    private readonly Mock<IAmazonDynamoDB> _mockDynamoDB;
-    private readonly Mock<DynamoDBContext> _mockDynamoContext;
+    private readonly Mock<IDynamoDBContext> _mockDynamoContext;
     private readonly MediaProcessor _handler;
 
     public MediaProcessorTests()
     {
         _mockS3 = new Mock<IAmazonS3>();
-        _mockDynamoDB = new Mock<IAmazonDynamoDB>();
-        _mockDynamoContext = new Mock<DynamoDBContext>(_mockDynamoDB.Object);
-        _handler = new MediaProcessor(_mockS3.Object, _mockDynamoDB.Object);
+        _mockDynamoContext = new Mock<IDynamoDBContext>();
+        _mockDynamoContext
+            .Setup(x => x.SaveAsync(It.IsAny<ProcessingJob>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _handler = new MediaProcessor(_mockS3.Object, _mockDynamoContext.Object);
     }
 
     [Fact]
@@ -43,27 +44,25 @@ public class MediaProcessorTests
             InputKey = $"{jobId}/test.jpg"
         };
 
-        // Create a mock image stream (simple JPEG header)
-        var mockImageData = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 };
-        var mockStream = new MemoryStream(mockImageData);
+        _mockDynamoContext
+            .Setup(x => x.LoadAsync<ProcessingJob>(It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(processingJob);
 
-        var getObjectResponse = new GetObjectResponse
-        {
-            ResponseStream = mockStream
-        };
+        // Real JPEG bytes (1x1 pixel) so ImageSharp can decode without throwing.
+        var jpegBytes = MinimalJpeg();
 
-        _mockS3.Setup(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), default))
-               .ReturnsAsync(getObjectResponse);
+        _mockS3.Setup(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()))
+               .ReturnsAsync(() => new GetObjectResponse { ResponseStream = new MemoryStream(jpegBytes) });
 
-        _mockS3.Setup(x => x.PutObjectAsync(It.IsAny<PutObjectRequest>(), default))
+        _mockS3.Setup(x => x.PutObjectAsync(It.IsAny<PutObjectRequest>(), It.IsAny<CancellationToken>()))
                .ReturnsAsync(new PutObjectResponse());
 
         // Act
         await _handler.FunctionHandler(s3Event, context);
 
         // Assert
-        _mockS3.Verify(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), default), Times.Once);
-        _mockS3.Verify(x => x.PutObjectAsync(It.IsAny<PutObjectRequest>(), default), Times.Once);
+        _mockS3.Verify(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        _mockS3.Verify(x => x.PutObjectAsync(It.IsAny<PutObjectRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -77,7 +76,7 @@ public class MediaProcessorTests
         await _handler.FunctionHandler(s3Event, context);
 
         // Verify no S3 operations were attempted
-        _mockS3.Verify(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), default), Times.Never);
+        _mockS3.Verify(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -94,15 +93,19 @@ public class MediaProcessorTests
             Status = "pending"
         };
 
-        _mockS3.Setup(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), default))
+        _mockDynamoContext
+            .Setup(x => x.LoadAsync<ProcessingJob>(It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(processingJob);
+
+        _mockS3.Setup(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()))
                .ThrowsAsync(new AmazonS3Exception("S3 Error"));
 
         // Act
         await _handler.FunctionHandler(s3Event, context);
 
         // Assert - Should handle exception gracefully
-        _mockS3.Verify(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), default), Times.Once);
-        _mockS3.Verify(x => x.PutObjectAsync(It.IsAny<PutObjectRequest>(), default), Times.Never);
+        _mockS3.Verify(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        _mockS3.Verify(x => x.PutObjectAsync(It.IsAny<PutObjectRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -122,23 +125,25 @@ public class MediaProcessorTests
         };
         var context = new LambdaTestContext();
 
-        var mockImageData = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 };
-        var mockStream1 = new MemoryStream(mockImageData);
-        var mockStream2 = new MemoryStream(mockImageData);
+        _mockDynamoContext
+            .SetupSequence(x => x.LoadAsync<ProcessingJob>(It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessingJob { JobId = jobId1, Status = "pending", OriginalFileName = "test1.jpg" })
+            .ReturnsAsync(new ProcessingJob { JobId = jobId2, Status = "pending", OriginalFileName = "test2.jpg" });
 
-        _mockS3.SetupSequence(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), default))
-               .ReturnsAsync(new GetObjectResponse { ResponseStream = mockStream1 })
-               .ReturnsAsync(new GetObjectResponse { ResponseStream = mockStream2 });
+        var jpegBytes = MinimalJpeg();
 
-        _mockS3.Setup(x => x.PutObjectAsync(It.IsAny<PutObjectRequest>(), default))
+        _mockS3.Setup(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()))
+               .ReturnsAsync(() => new GetObjectResponse { ResponseStream = new MemoryStream(jpegBytes) });
+
+        _mockS3.Setup(x => x.PutObjectAsync(It.IsAny<PutObjectRequest>(), It.IsAny<CancellationToken>()))
                .ReturnsAsync(new PutObjectResponse());
 
         // Act
         await _handler.FunctionHandler(s3Event, context);
 
         // Assert
-        _mockS3.Verify(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), default), Times.Exactly(2));
-        _mockS3.Verify(x => x.PutObjectAsync(It.IsAny<PutObjectRequest>(), default), Times.Exactly(2));
+        _mockS3.Verify(x => x.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        _mockS3.Verify(x => x.PutObjectAsync(It.IsAny<PutObjectRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     private static S3Event CreateS3Event(string bucketName, string objectKey)
@@ -162,5 +167,16 @@ public class MediaProcessorTests
                 Object = new S3Event.S3ObjectEntity { Key = objectKey }
             }
         };
+    }
+
+    /// <summary>
+    /// Encodes a 1x1 white pixel as a real JPEG so ImageSharp can decode it during tests.
+    /// </summary>
+    private static byte[] MinimalJpeg()
+    {
+        using var image = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(1, 1);
+        using var ms = new MemoryStream();
+        image.Save(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder());
+        return ms.ToArray();
     }
 }

@@ -15,19 +15,17 @@ namespace LambdaHandlers.Handlers;
 public class MediaProcessor
 {
     private readonly IAmazonS3 _s3Client;
-    private readonly IAmazonDynamoDB _dynamoDbClient;
-    private readonly DynamoDBContext _dynamoDbContext;
+    private readonly IDynamoDBContext _dynamoDbContext;
     private readonly string _outputBucket;
 
-    public MediaProcessor() : this(new AmazonS3Client(), new AmazonDynamoDBClient())
+    public MediaProcessor() : this(new AmazonS3Client(), new DynamoDBContext(new AmazonDynamoDBClient()))
     {
     }
 
-    public MediaProcessor(IAmazonS3 s3Client, IAmazonDynamoDB dynamoDbClient)
+    public MediaProcessor(IAmazonS3 s3Client, IDynamoDBContext dynamoDbContext)
     {
         _s3Client = s3Client;
-        _dynamoDbClient = dynamoDbClient;
-        _dynamoDbContext = new DynamoDBContext(_dynamoDbClient);
+        _dynamoDbContext = dynamoDbContext;
         _outputBucket = Environment.GetEnvironmentVariable("OUTPUT_BUCKET") ?? "media-processor-output-bucket";
     }
 
@@ -115,8 +113,12 @@ public class MediaProcessor
         inputStream.Position = 0;
 
         context.Logger.LogInformation("Processing image...");
-        
-        await Task.Delay(TimeSpan.FromSeconds(35));
+
+        var demoDelaySeconds = int.TryParse(Environment.GetEnvironmentVariable("PROCESSING_DEMO_DELAY_SECONDS"), out var s) ? s : 0;
+        if (demoDelaySeconds > 0)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(demoDelaySeconds));
+        }
 
         using var image = await Image.LoadAsync(inputStream);
         

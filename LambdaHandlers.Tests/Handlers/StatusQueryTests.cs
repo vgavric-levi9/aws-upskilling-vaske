@@ -14,17 +14,22 @@ namespace LambdaHandlers.Tests.Handlers;
 
 public class StatusQueryTests
 {
-    private readonly Mock<IAmazonDynamoDB> _mockDynamoDB;
-    private readonly Mock<DynamoDBContext> _mockDynamoContext;
+    private readonly Mock<IDynamoDBContext> _mockDynamoContext;
     private readonly Mock<IAmazonS3> _mockS3;
     private readonly StatusQuery _handler;
 
     public StatusQueryTests()
     {
-        _mockDynamoDB = new Mock<IAmazonDynamoDB>();
-        _mockDynamoContext = new Mock<DynamoDBContext>(_mockDynamoDB.Object);
+        _mockDynamoContext = new Mock<IDynamoDBContext>();
         _mockS3 = new Mock<IAmazonS3>();
-        _handler = new StatusQuery(_mockDynamoDB.Object, _mockS3.Object);
+        _handler = new StatusQuery(_mockDynamoContext.Object, _mockS3.Object);
+    }
+
+    private void SetupLoad(ProcessingJob? job)
+    {
+        _mockDynamoContext
+            .Setup(x => x.LoadAsync<ProcessingJob>(It.IsAny<object>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult(job!));
     }
 
     [Fact]
@@ -48,6 +53,7 @@ public class StatusQueryTests
             UploadedAt = DateTime.UtcNow.AddMinutes(-5),
             ProcessingStartedAt = DateTime.UtcNow.AddMinutes(-2)
         };
+        SetupLoad(processingJob);
 
         // Act
         var response = await _handler.FunctionHandler(request, context);
@@ -90,6 +96,7 @@ public class StatusQueryTests
             ProcessedHeight = 600,
             ProcessedFileSize = 150000
         };
+        SetupLoad(processingJob);
 
         _mockS3.Setup(x => x.GetPreSignedURLAsync(It.IsAny<GetPreSignedUrlRequest>()))
                .ReturnsAsync("https://s3.amazonaws.com/presigned-url");
@@ -122,6 +129,7 @@ public class StatusQueryTests
             PathParameters = new Dictionary<string, string> { { "jobId", jobId } }
         };
         var context = new LambdaTestContext();
+        SetupLoad(null);
 
         // Act
         var response = await _handler.FunctionHandler(request, context);
@@ -183,6 +191,7 @@ public class StatusQueryTests
             ProcessingCompletedAt = DateTime.UtcNow.AddMinutes(-5),
             ErrorMessage = "Image processing failed due to invalid format"
         };
+        SetupLoad(processingJob);
 
         // Act
         var response = await _handler.FunctionHandler(request, context);
@@ -221,6 +230,7 @@ public class StatusQueryTests
             OriginalFileName = "test.jpg",
             UploadedAt = DateTime.UtcNow
         };
+        SetupLoad(processingJob);
 
         // Act
         var response = await _handler.FunctionHandler(request, context);

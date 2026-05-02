@@ -15,19 +15,17 @@ namespace LambdaHandlers.Handlers;
 public class ImageUpload
 {
     private readonly IAmazonS3 _s3Client;
-    private readonly IAmazonDynamoDB _dynamoDbClient;
-    private readonly DynamoDBContext _dynamoDbContext;
+    private readonly IDynamoDBContext _dynamoDbContext;
     private readonly string _inputBucket;
 
-    public ImageUpload() : this(new AmazonS3Client(), new AmazonDynamoDBClient())
+    public ImageUpload() : this(new AmazonS3Client(), new DynamoDBContext(new AmazonDynamoDBClient()))
     {
     }
 
-    public ImageUpload(IAmazonS3 s3Client, IAmazonDynamoDB dynamoDbClient)
+    public ImageUpload(IAmazonS3 s3Client, IDynamoDBContext dynamoDbContext)
     {
         _s3Client = s3Client;
-        _dynamoDbClient = dynamoDbClient;
-        _dynamoDbContext = new DynamoDBContext(_dynamoDbClient);
+        _dynamoDbContext = dynamoDbContext;
         _inputBucket = Environment.GetEnvironmentVariable("INPUT_BUCKET") ?? "media-processor-input-bucket";
     }
 

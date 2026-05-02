@@ -15,11 +15,15 @@ namespace Pipeline;
 public class PipelineStack : Stack
 {
     public readonly Bucket ArtifactsBucket;
-    
-    // GitHub configuration - update these values for your repository
-    private const string GITHUB_OWNER = "vgavric-levi9";  // Replace with your GitHub username
-    private const string GITHUB_REPO = "aws-upskilling-vaske";   // Replace with your repository name
-    private const string GITHUB_BRANCH = "main";                 // Main branch for auto-trigger
+
+    // GitHub configuration (CodeStar / CodeConnections — no OAuth token required)
+    private const string GITHUB_OWNER = "vgavric-levi9";
+    private const string GITHUB_REPO = "aws-upskilling-vaske";
+    private const string GITHUB_BRANCH = "main";
+
+    // CodeStar Connection ARN (AWS Console → Developer Tools → Connections → Available)
+    private const string CODESTAR_CONNECTION_ARN =
+        "arn:aws:codeconnections:eu-north-1:765891906457:connection/d6ffe422-9ed1-4023-b5da-dda157581b4a";
 
     public PipelineStack(Construct scope, string id, IStackProps? props = null)
         : base(scope, id, props)
@@ -391,7 +395,7 @@ public class PipelineStack : Stack
     /// </summary>
     private Amazon.CDK.AWS.CodePipeline.Pipeline CreateMainPipeline(Artifact_ sourceOutput, Artifact_ buildOutput, PipelineProject testProject, PipelineProject deployProject)
     {
-        return new Amazon.CDK.AWS.CodePipeline.Pipeline(this, "VaskeMainPipeline", new PipelineProps
+        var pipeline = new Amazon.CDK.AWS.CodePipeline.Pipeline(this, "VaskeMainPipeline", new PipelineProps
         {
             PipelineName = "VaskeMediaProcessor-CICD",
             PipelineType = PipelineType.V2,
@@ -399,25 +403,25 @@ public class PipelineStack : Stack
             CrossAccountKeys = false,
             Stages = new[]
             {
-                // Source Stage - GitHub (Automatic on push to main)
+                // Source Stage - GitHub via CodeStar Connections (auto-trigger on push to main)
                 new Amazon.CDK.AWS.CodePipeline.StageProps
                 {
                     StageName = "Source",
                     Actions = new[]
                     {
-                        new GitHubSourceAction(new GitHubSourceActionProps
+                        new CodeStarConnectionsSourceAction(new CodeStarConnectionsSourceActionProps
                         {
                             ActionName = "GitHubSource",
                             Owner = GITHUB_OWNER,
                             Repo = GITHUB_REPO,
                             Branch = GITHUB_BRANCH,
                             Output = sourceOutput,
-                            OauthToken = SecretValue.SecretsManager("github-token"), // GitHub Personal Access Token
-                            Trigger = GitHubTrigger.WEBHOOK  // Automatic trigger on push
+                            ConnectionArn = CODESTAR_CONNECTION_ARN,
+                            TriggerOnPush = true
                         })
                     }
                 },
-                // Test & Build Stage
+                // Test & Build Stage (tests run here; pre_build aborts on test failure → pipeline fails)
                 new Amazon.CDK.AWS.CodePipeline.StageProps
                 {
                     StageName = "TestAndBuild",
@@ -432,7 +436,7 @@ public class PipelineStack : Stack
                         })
                     }
                 },
-                // Deploy Stage
+                // Deploy Stage (only reached if tests + build succeed)
                 new Amazon.CDK.AWS.CodePipeline.StageProps
                 {
                     StageName = "Deploy",
@@ -448,6 +452,15 @@ public class PipelineStack : Stack
                 }
             }
         });
+
+        pipeline.AddToRolePolicy(new PolicyStatement(new PolicyStatementProps
+        {
+            Effect = Effect.ALLOW,
+            Actions = new[] { "codestar-connections:UseConnection", "codeconnections:UseConnection" },
+            Resources = new[] { CODESTAR_CONNECTION_ARN }
+        }));
+
+        return pipeline;
     }
 
     /// <summary>
@@ -457,28 +470,29 @@ public class PipelineStack : Stack
     {
         var destroySourceOutput = new Artifact_("VaskeDestroySource");
 
-        return new Amazon.CDK.AWS.CodePipeline.Pipeline(this, "VaskeDestroyPipeline", new PipelineProps
+        var destroyPipeline = new Amazon.CDK.AWS.CodePipeline.Pipeline(this, "VaskeDestroyPipeline", new PipelineProps
         {
-            PipelineName = "VaskeMediaProcessor-Destroy", 
+            PipelineName = "VaskeMediaProcessor-Destroy",
             PipelineType = PipelineType.V2,
             ArtifactBucket = ArtifactsBucket,
             CrossAccountKeys = false,
             Stages = new[]
             {
+                // Same GitHub source via CodeStar — but never auto-trigger; manual "Release change" only.
                 new Amazon.CDK.AWS.CodePipeline.StageProps
                 {
                     StageName = "Source",
                     Actions = new[]
                     {
-                        new GitHubSourceAction(new GitHubSourceActionProps
+                        new CodeStarConnectionsSourceAction(new CodeStarConnectionsSourceActionProps
                         {
                             ActionName = "GitHubSource",
                             Owner = GITHUB_OWNER,
                             Repo = GITHUB_REPO,
                             Branch = GITHUB_BRANCH,
                             Output = destroySourceOutput,
-                            OauthToken = SecretValue.SecretsManager("github-token"),
-                            Trigger = GitHubTrigger.NONE  // Manual trigger only for safety
+                            ConnectionArn = CODESTAR_CONNECTION_ARN,
+                            TriggerOnPush = false
                         })
                     }
                 },
@@ -497,6 +511,15 @@ public class PipelineStack : Stack
                 }
             }
         });
+
+        destroyPipeline.AddToRolePolicy(new PolicyStatement(new PolicyStatementProps
+        {
+            Effect = Effect.ALLOW,
+            Actions = new[] { "codestar-connections:UseConnection", "codeconnections:UseConnection" },
+            Resources = new[] { CODESTAR_CONNECTION_ARN }
+        }));
+
+        return destroyPipeline;
     }
 
     /// <summary>

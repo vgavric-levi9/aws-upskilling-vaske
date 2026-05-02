@@ -12,18 +12,16 @@ namespace LambdaHandlers.Handlers;
 
 public class StatusQuery
 {
-    private readonly IAmazonDynamoDB _dynamoDbClient;
-    private readonly DynamoDBContext _dynamoDbContext;
+    private readonly IDynamoDBContext _dynamoDbContext;
     private readonly IAmazonS3 _s3Client;
 
-    public StatusQuery() : this(new AmazonDynamoDBClient(), new AmazonS3Client())
+    public StatusQuery() : this(new DynamoDBContext(new AmazonDynamoDBClient()), new AmazonS3Client())
     {
     }
 
-    public StatusQuery(IAmazonDynamoDB dynamoDbClient, IAmazonS3 s3Client)
+    public StatusQuery(IDynamoDBContext dynamoDbContext, IAmazonS3 s3Client)
     {
-        _dynamoDbClient = dynamoDbClient;
-        _dynamoDbContext = new DynamoDBContext(_dynamoDbClient);
+        _dynamoDbContext = dynamoDbContext;
         _s3Client = s3Client;
     }
 

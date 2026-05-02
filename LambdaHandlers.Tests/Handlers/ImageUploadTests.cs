@@ -15,16 +15,17 @@ namespace LambdaHandlers.Tests.Handlers;
 public class ImageUploadTests
 {
     private readonly Mock<IAmazonS3> _mockS3;
-    private readonly Mock<IAmazonDynamoDB> _mockDynamoDB;
-    private readonly Mock<DynamoDBContext> _mockDynamoContext;
+    private readonly Mock<IDynamoDBContext> _mockDynamoContext;
     private readonly ImageUpload _handler;
 
     public ImageUploadTests()
     {
         _mockS3 = new Mock<IAmazonS3>();
-        _mockDynamoDB = new Mock<IAmazonDynamoDB>();
-        _mockDynamoContext = new Mock<DynamoDBContext>(_mockDynamoDB.Object);
-        _handler = new ImageUpload(_mockS3.Object, _mockDynamoDB.Object);
+        _mockDynamoContext = new Mock<IDynamoDBContext>();
+        _mockDynamoContext
+            .Setup(x => x.SaveAsync(It.IsAny<ProcessingJob>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _handler = new ImageUpload(_mockS3.Object, _mockDynamoContext.Object);
     }
 
     [Fact]

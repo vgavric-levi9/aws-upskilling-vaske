@@ -138,70 +138,270 @@ Each Lambda function has a dedicated IAM role with minimal required permissions:
 - **API Gateway**: CORS configured for web client access
 - **DynamoDB**: Encrypted at rest, VPC endpoints available
 
-## 🚀 Deployment Guide
+## 🚀 Deployment Architecture & Pipeline Flow
 
-### Prerequisites
+### 📦 CloudFormation Stacks Overview
 
-1. **.NET 8 SDK**: `dotnet --version` should show 8.x
-2. **AWS CLI**: Configured with appropriate credentials
-3. **CDK Bootstrap**: One-time setup for CDK deployments
-4. **CodeStar Connection**: GitHub integration (already configured)
+The deployment creates **two separate CloudFormation stacks** with distinct responsibilities:
 
-### 🔧 One-Time Setup
+#### 1. 🔧 Pipeline Stack: `VaskeMediaProcessor-Pipeline`
+**Location**: `CI-CD/Pipeline/PipelineStack.cs`  
+**Purpose**: CI/CD infrastructure for automated deployment
 
+```
+Resources Created:
+├── 🔄 CodePipeline: VaskeMediaProcessor-CICD (main deployment)
+├── 🗑️ CodePipeline: VaskeMediaProcessor-Destroy (cleanup pipeline)  
+├── 🏗️ CodeBuild Projects:
+│   ├── VaskeMediaProcessor-TestAndBuild (testing & compilation)
+│   ├── VaskeMediaProcessor-Deploy (CDK deployment)
+│   └── VaskeMediaProcessor-Destroy (cleanup operations)
+├── 📦 S3 Bucket: vaske-pipeline-artifacts-{account} (build artifacts)
+├── 📋 CloudWatch Log Groups (build logs)
+└── 🔐 IAM Roles & Policies (pipeline permissions)
+```
+
+#### 2. ⚡ Application Stack: `VaskeMediaProcessor-App`
+**Location**: `Infrastructure/InfrastructureStack.cs`  
+**Purpose**: Actual serverless application resources
+
+```
+Resources Created:
+├── 🔄 Lambda Functions:
+│   ├── VaskeImageUploadHandler (image upload processing)
+│   ├── VaskeMediaProcessorHandler (image processing)
+│   └── VaskeStatusQueryHandler (status queries)
+├── 📦 S3 Buckets:
+│   ├── vaske-media-processor-input-{account} (raw images)
+│   └── vaske-media-processor-output-{account} (processed images)
+├── 🗄️ DynamoDB Table: VaskeMediaProcessingJobs (job tracking)
+├── 🌐 API Gateway: Vaske Media Processor API (REST endpoints)
+├── 📊 CloudWatch Resources (logs, dashboards, metrics)
+└── 🔐 IAM Roles & Policies (application permissions)
+```
+
+### 🔄 Complete Pipeline Flow & Artifacts
+
+#### Stage 1: 📥 **Source** (GitHub Integration)
+```
+Developer pushes to 'main' branch
+           ↓
+GitHub Repository: vgavric-levi9/aws-upskilling-vaske
+           ↓ (CodeStar Connection: d6ffe422-...)
+CodePipeline automatically triggered
+           ↓
+Artifact: VaskeSourceOutput.zip
+├── Source code (all .cs files)
+├── Project files (*.csproj, *.sln)
+├── CDK configuration (cdk.json)
+├── Build specification (buildspec.yml)
+└── Documentation files
+```
+
+#### Stage 2: 🧪 **TestAndBuild** (Quality Gate + Compilation)
+**CodeBuild Project**: `VaskeMediaProcessor-TestAndBuild`  
+**Build Environment**: Amazon Linux (STANDARD_7_0), .NET 8, Node.js 20
+
+```
+📋 Install Phase:
+├── Install .NET 8 runtime
+├── Install Node.js 20  
+├── Install AWS CDK globally
+└── Verify tool versions
+
+🧪 Pre-Build Phase (CRITICAL - Pipeline fails if tests fail):
+├── dotnet restore (all projects)
+├── dotnet build LambdaHandlers (Release mode)
+├── dotnet build LambdaHandlers.Tests (Release mode)
+├── dotnet test (with TRX logging)
+└── ❌ ABORT on test failure → Pipeline stops here
+
+🏗️ Build Phase:
+├── dotnet build Infrastructure (Release mode)
+├── dotnet publish LambdaHandlers → /bin/Release/net8.0/publish/
+└── Package all artifacts for deployment
+
+📊 Artifacts Generated:
+└── VaskeBuildOutput.zip
+    ├── LambdaHandlers/bin/Release/net8.0/publish/ (compiled Lambda code)
+    ├── Infrastructure/ (CDK infrastructure code)
+    ├── TestResults/ (test reports in TRX format)
+    └── Complete source tree
+```
+
+#### Stage 3: 🚀 **Deploy** (Infrastructure Deployment)
+**CodeBuild Project**: `VaskeMediaProcessor-Deploy`  
+**Input**: VaskeBuildOutput artifact from Stage 2
+
+```
+🔧 Pre-Build Phase:
+├── dotnet restore Infrastructure/Infrastructure.csproj
+├── dotnet build Infrastructure (Release mode)
+└── Prepare CDK environment
+
+🌟 Build Phase (Actual Deployment):
+├── cd Infrastructure/
+├── cdk diff VaskeMediaProcessor-App (preview changes)
+├── cdk deploy VaskeMediaProcessor-App --require-approval never
+│   ├── Create/Update Lambda functions (using published binaries)
+│   ├── Create/Update S3 buckets
+│   ├── Create/Update DynamoDB table
+│   ├── Create/Update API Gateway
+│   ├── Create/Update IAM roles & policies
+│   └── Create/Update CloudWatch resources
+└── Output deployment summary
+
+📋 CloudFormation Actions:
+├── Stack: VaskeMediaProcessor-App
+├── Change Set: Calculated by CDK
+├── Resource Updates: Applied automatically
+└── Stack Outputs: API URLs, bucket names, etc.
+```
+
+### 🔧 Deployment Prerequisites & Setup
+
+#### One-Time AWS Setup
 ```powershell
-# 1. CDK Bootstrap (first time only)
+# 1. CDK Bootstrap (enables CDK deployments)
 $env:CDK_DEFAULT_ACCOUNT = "765891906457"
 $env:CDK_DEFAULT_REGION = "eu-north-1" 
 cdk bootstrap aws://765891906457/eu-north-1 --qualifier vgavric
 
-# 2. Deploy CI/CD Pipeline (creates automated deployment)
+# 2. Deploy Pipeline Stack (one-time infrastructure setup)
 cd "CI-CD\Pipeline"
 dotnet build
 cdk deploy VaskeMediaProcessor-Pipeline
 ```
 
-### 🚀 Automated Deployment (Recommended)
-
-After pipeline setup, deployment is **fully automated**:
-
+#### CodeStar Connection Verification
 ```bash
-# Any push to 'main' branch triggers automatic deployment
-git add .
-git commit -m "deploy changes"
-git push origin main
-
-# Pipeline stages:
-# 1. Source: GitHub → CodePipeline  
-# 2. TestAndBuild: Unit tests (must pass) + build
-# 3. Deploy: CDK deployment of infrastructure
+# Ensure GitHub connection is active
+AWS Console → Developer Tools → Connections → 
+Status: "Available" for connection d6ffe422-9ed1-4023-b5da-dda157581b4a
 ```
 
-### 🔄 Manual Deployment (Alternative)
+### 🚀 Automated Deployment Process
 
+Once pipeline is deployed, every code change triggers automatic deployment:
+
+```bash
+# Standard development workflow
+git add .
+git commit -m "implement new feature"
+git push origin main  # 🚀 Triggers automated pipeline
+
+# Pipeline execution (fully automated):
+# ⏱️  Total time: ~8-12 minutes
+# 
+# Stage 1: Source       (~30 seconds)
+# Stage 2: TestAndBuild (~4-6 minutes)  
+# Stage 3: Deploy       (~4-6 minutes)
+```
+
+### 📊 Build Artifacts & Storage
+
+#### S3 Artifacts Bucket: `vaske-pipeline-artifacts-{account}`
+```
+Pipeline Artifacts Structure:
+├── VaskeMediaProcessor-CICD/
+│   ├── Source/
+│   │   └── VaskeSourceOutput/ (GitHub source code)
+│   ├── TestAndBuild/  
+│   │   └── VaskeBuildOutput/ (compiled + tested code)
+│   └── Deploy/
+│       └── Deployment logs and outputs
+└── VaskeMediaProcessor-Destroy/
+    └── Source/ (for destroy pipeline)
+
+Artifact Retention:
+├── Versioned storage (automatic versioning enabled)
+├── Encrypted at rest (S3-managed encryption)
+└── Auto-cleanup on stack deletion
+```
+
+#### CodeBuild Artifacts
+```
+TestAndBuild Artifacts:
+├── 📦 Compiled Lambda binaries (ready for deployment)
+├── 🧪 Test results (TRX format for Visual Studio)
+├── 📋 Build logs (CloudWatch)
+└── 📊 Test reports (CodeBuild reports)
+
+Deploy Artifacts:
+├── 📋 CDK deployment logs
+├── 🌟 CloudFormation change sets
+├── 📊 Resource creation summaries  
+└── 🔗 Stack outputs (API URLs, resource ARNs)
+```
+
+### 🔄 Alternative Deployment Options
+
+#### Manual Deployment (Development/Testing)
 ```powershell
-# Build Lambda handlers
+# Build Lambda code manually
 cd LambdaHandlers  
-dotnet publish -c Release
+dotnet publish -c Release -o bin/Release/net8.0/publish
 
-# Deploy infrastructure
+# Deploy infrastructure directly
 cd ..\Infrastructure
 cdk deploy VaskeMediaProcessor-App
 ```
 
-### 🗑️ Cleanup/Destroy
+#### Pipeline Triggers
+```bash
+# Automatic trigger (recommended)
+git push origin main  # Triggers on push to main
 
-```powershell
-# Option 1: Use destroy pipeline (recommended)
-# AWS Console → CodePipeline → VaskeMediaProcessor-Destroy → Release Change
+# Manual trigger (same code, manual execution)  
+AWS Console → CodePipeline → VaskeMediaProcessor-CICD → Release Change
+```
 
-# Option 2: Manual cleanup
+### 🗑️ Cleanup & Destruction Process
+
+#### Option 1: Automated Destroy Pipeline
+```
+AWS Console → CodePipeline → VaskeMediaProcessor-Destroy → Release Change
+
+Destroy Process:
+1. Source: Pull latest main branch  
+2. Destroy: Execute 'cdk destroy VaskeMediaProcessor-App --force'
+3. Result: All application resources removed
+```
+
+#### Option 2: Manual Cleanup
+```powershell  
+# Remove application stack
 cd Infrastructure
 cdk destroy VaskeMediaProcessor-App
 
-# Option 3: Remove everything including pipeline
-cd ..\CI-CD\Pipeline  
+# Remove pipeline stack (optional)
+cd ..\CI-CD\Pipeline
 cdk destroy VaskeMediaProcessor-Pipeline
+```
+
+### 📋 Deployment Monitoring
+
+#### CodePipeline Console
+- **Pipeline URL**: Available in CloudFormation outputs
+- **Execution History**: View all pipeline runs
+- **Stage Details**: Logs for each build phase
+- **Artifact Downloads**: Access build outputs
+
+#### CloudWatch Integration  
+- **Build Logs**: `/aws/codebuild/VaskeMediaProcessor-*` log groups
+- **Pipeline Metrics**: Success/failure rates, duration trends
+- **Lambda Logs**: Post-deployment function testing
+
+#### Deployment Verification Checklist
+```
+✅ Pipeline Status: All stages succeeded
+✅ CloudFormation: VaskeMediaProcessor-App stack complete  
+✅ API Gateway: Endpoints accessible
+✅ Lambda Functions: All 3 functions deployed and configured
+✅ S3 Buckets: Input/output buckets created
+✅ DynamoDB: Processing table ready
+✅ IAM Roles: Least-privilege permissions applied
+✅ CloudWatch: Logging and monitoring active
 ```
 
 ## 📊 Monitoring & Observability
